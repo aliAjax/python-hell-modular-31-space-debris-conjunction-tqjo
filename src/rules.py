@@ -8,14 +8,15 @@ ACTION_ROLES = {
     "assess": {"analyst"},
     "record_opinion": {"operator"},
     "approve": {"coordinator"},
-    "execute": {"operator"},
+    "initiate_command": {"operator"},
+    "record_receipt": {"operator", "coordinator"},
     "resolve": {"coordinator"},
     "cancel": {"coordinator"},
     "report_revision": {"analyst"},
 }
 ENFORCE_REGION = False
 REGION_SENSITIVE_ACTIONS = set()
-ACTION_REQUIRES_VERSION = {"approve", "execute", "resolve", "cancel"}
+ACTION_REQUIRES_VERSION = {"approve", "initiate_command", "record_receipt", "resolve", "cancel"}
 
 
 def assess(payload):
@@ -79,11 +80,18 @@ def apply_action(item, action, payload, actor, role):
         }
         if revision["covariance_m"] <= 0:
             raise DomainError("invalid_covariance", "协方差必须大于零")
+        old_level = current.get("assessment", {}).get("level")
         current.setdefault("revisions", []).append(revision)
         current["miss_distance_m"] = revision["miss_distance_m"]
         current["covariance_m"] = revision["covariance_m"]
         current["assessment"] = assess(current)
-        return status, current, {"revision": revision}
+        new_level = current["assessment"].get("level")
+        void_pending = status == "executing" and old_level != new_level
+        new_status = "assessed" if void_pending else status
+        event = {"revision": revision, "risk_level_changed": void_pending}
+        if void_pending:
+            event["_void_pending_commands"] = True
+        return new_status, current, event
 
     if action == "record_opinion":
         _need_status(item, {"assessed", "coordinating"})
@@ -108,12 +116,6 @@ def apply_action(item, action, payload, actor, role):
         window = _require_text(payload, "maneuver_window")
         current["approved_maneuver"] = {"fuel_cost_m_s": fuel, "maneuver_window": window}
         return "coordinating", current, {"approved_maneuver": current["approved_maneuver"]}
-
-    if action == "execute":
-        _need_status(item, {"coordinating"})
-        command_ref = _require_text(payload, "command_ref")
-        current["command_ref"] = command_ref
-        return "executing", current, {"command_ref": command_ref}
 
     if action == "resolve":
         _need_status(item, {"executing"})

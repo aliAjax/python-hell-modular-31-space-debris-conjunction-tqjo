@@ -37,18 +37,52 @@ class Service:
         )
         return result
 
-    def act(self, item_id, action, payload, actor, role, expected_version=None, region=None):
+    def _check_identity_role(self, item_id, action, actor, role, expected_version):
         if not actor or not role:
             raise DomainError("identity_required", "需要用户身份和角色", 401)
         item = self.repository.get_item(item_id)
         allowed = rules.ACTION_ROLES.get(action, set())
         if role not in allowed:
             raise DomainError("forbidden", "当前角色不能执行该操作", 403)
+        if action in rules.ACTION_REQUIRES_VERSION and expected_version is None:
+            raise DomainError("expected_version_required", "该操作需要 expected_version", 400)
+        return item
+
+    def act(self, item_id, action, payload, actor, role, expected_version=None, region=None):
+        item = self._check_identity_role(item_id, action, actor, role, expected_version)
         if rules.ENFORCE_REGION and action in rules.REGION_SENSITIVE_ACTIONS and region and role != "regulator":
             if item["payload"].get("region") != region:
                 raise DomainError("region_mismatch", "不能处理其他区域的记录", 403)
-        if action in rules.ACTION_REQUIRES_VERSION and expected_version is None:
-            raise DomainError("expected_version_required", "该操作需要 expected_version", 400)
+
+        if action == "initiate_command":
+            command_ref = domain.require_text(payload, "command_ref")
+            approved = item["payload"].get("approved_maneuver", {})
+            command_payload = {
+                "command_ref": command_ref,
+                "fuel_cost_m_s": payload.get("fuel_cost_m_s", approved.get("fuel_cost_m_s")),
+                "maneuver_window": payload.get("maneuver_window", approved.get("maneuver_window")),
+            }
+            self.repository.initiate_command(
+                item_id, command_ref, command_payload, actor, role, expected_version
+            )
+            return self.get_item(item_id)
+
+        if action == "record_receipt":
+            coordination_number = domain.require_text(payload, "coordination_number")
+            received_at = domain.parse_timestamp(payload, "received_at")
+            receipt_payload = payload.get("receipt_payload", {})
+            if not isinstance(receipt_payload, dict):
+                raise DomainError("invalid_payload", "receipt_payload 必须是对象")
+            self.repository.record_receipt(
+                item_id, coordination_number, received_at, receipt_payload, actor, role, expected_version
+            )
+            return self.get_item(item_id)
+
+        if action == "resolve":
+            reconciliation = self.repository.reconciliation(item_id)
+            if not reconciliation["executed"]:
+                raise DomainError("command_not_executed", "规避指令尚未收到协调编号回执，不能结束事件", 409)
+
         new_status, new_payload, event_payload = rules.apply_action(item, action, payload, actor, role)
         self.repository.apply_action(
             item_id, action, actor, role, new_status, new_payload, event_payload, expected_version
@@ -59,8 +93,16 @@ class Service:
         item = self.repository.get_item(item_id)
         item["sources"] = self.repository.list_sources(item_id)
         item["audit"] = self.repository.audit_trail(item_id)
+        item["commands"] = self.repository.list_commands(item_id)
+        item["receipts"] = self.repository.list_receipts(item_id)
         item["assessment"] = rules.assess(item["payload"])
         return item
+
+    def reconciliation(self, item_id):
+        return self.repository.reconciliation(item_id)
+
+    def reconciliation_state(self):
+        return self.repository.reconciliation_state()
 
     def list_items(self, status=None):
         return self.repository.list_items(status)

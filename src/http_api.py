@@ -50,6 +50,8 @@ def build_handler(service, static_dir):
                     return self._send(200, {"status": "ok"})
                 if path == "/api/state":
                     return self._send(200, service.state())
+                if path == "/api/reconciliation":
+                    return self._send(200, service.reconciliation_state())
                 if path == "/api/items":
                     return self._send(200, {"items": service.list_items()})
                 parts = [part for part in path.split("/") if part]
@@ -58,6 +60,8 @@ def build_handler(service, static_dir):
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "audit":
                     item = service.get_item(int(parts[2]))
                     return self._send(200, {"events": item["audit"]})
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "reconciliation":
+                    return self._send(200, service.reconciliation(int(parts[2])))
                 if path == "/":
                     file_path = os.path.join(static_dir, "index.html")
                     with open(file_path, "rb") as handle:
