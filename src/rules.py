@@ -8,14 +8,26 @@ ACTION_ROLES = {
     "assess": {"analyst"},
     "record_opinion": {"operator"},
     "approve": {"coordinator"},
-    "execute": {"operator"},
+    "execute": {"operator", "coordinator"},
+    "reissue_command": {"operator", "coordinator"},
+    "cancel_command": {"operator", "coordinator"},
     "resolve": {"coordinator"},
     "cancel": {"coordinator"},
     "report_revision": {"analyst"},
+    "ingest_receipt": {"operator", "coordinator", "system"},
 }
 ENFORCE_REGION = False
 REGION_SENSITIVE_ACTIONS = set()
-ACTION_REQUIRES_VERSION = {"approve", "execute", "resolve", "cancel"}
+ACTION_REQUIRES_VERSION = {"approve", "execute", "reissue_command", "cancel_command", "resolve", "cancel"}
+
+# 规避指令对账生命周期：发出后必须收到带协调编号的回执才算完成
+COMMAND_PENDING = "pending"
+COMMAND_CONFIRMED = "confirmed"
+COMMAND_SUPERSEDED = "superseded"
+COMMAND_VOIDED = "voided"
+COMMAND_CANCELLED = "cancelled"
+OPEN_COMMAND_STATES = {COMMAND_PENDING}
+FINAL_COMMAND_STATES = {COMMAND_CONFIRMED, COMMAND_SUPERSEDED, COMMAND_VOIDED, COMMAND_CANCELLED}
 
 
 def assess(payload):
@@ -55,6 +67,18 @@ def _require_text(payload, name):
     return value.strip()
 
 
+def build_revision(payload):
+    revision = {
+        "observed_at": _require_text(payload, "observed_at"),
+        "miss_distance_m": _require_number(payload, "miss_distance_m", 0),
+        "covariance_m": _require_number(payload, "covariance_m", 0.001),
+        "source": _require_text(payload, "source"),
+    }
+    if revision["covariance_m"] <= 0:
+        raise DomainError("invalid_covariance", "协方差必须大于零")
+    return revision
+
+
 def apply_action(item, action, payload, actor, role):
     status = item["status"]
     current = dict(item["payload"])
@@ -71,14 +95,7 @@ def apply_action(item, action, payload, actor, role):
 
     if action == "report_revision":
         _need_status(item, {"pending", "assessed", "coordinating", "executing"})
-        revision = {
-            "observed_at": _require_text(payload, "observed_at"),
-            "miss_distance_m": _require_number(payload, "miss_distance_m", 0),
-            "covariance_m": _require_number(payload, "covariance_m", 0.001),
-            "source": _require_text(payload, "source"),
-        }
-        if revision["covariance_m"] <= 0:
-            raise DomainError("invalid_covariance", "协方差必须大于零")
+        revision = build_revision(payload)
         current.setdefault("revisions", []).append(revision)
         current["miss_distance_m"] = revision["miss_distance_m"]
         current["covariance_m"] = revision["covariance_m"]

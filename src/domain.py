@@ -92,6 +92,31 @@ def normalize_create(payload):
     }
 
 
+def normalize_command(payload):
+    command_ref = require_text(payload, "command_ref")
+    instruction = payload.get("instruction")
+    if instruction is not None:
+        instruction = str(instruction).strip() or None
+    return {"command_ref": command_ref, "instruction": instruction}
+
+
+def normalize_receipt(payload):
+    command_ref = require_text(payload, "command_ref")
+    coordination_ref = require_text(payload, "coordination_ref")
+    note = payload.get("note")
+    if note is not None:
+        note = str(note).strip() or None
+    remote_status = payload.get("status")
+    if remote_status is not None:
+        remote_status = str(remote_status).strip() or None
+    return {
+        "command_ref": command_ref,
+        "coordination_ref": coordination_ref,
+        "note": note,
+        "remote_status": remote_status,
+    }
+
+
 def normalize_source(payload):
     source_type = require_text(payload, "source_type")
     external_id = require_text(payload, "external_id")

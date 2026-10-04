@@ -1,7 +1,17 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><title>太空碎片接近协调</title>
-<body><h1>太空碎片接近预警与规避协调</h1><p>服务已启动。使用 JSON API 创建接近事件、记录来源、执行评估和协调动作。</p><pre>GET /health
-GET /api/state
+<body><h1>太空碎片接近预警与规避协调</h1><p>服务已启动。使用 JSON API 创建接近事件、记录来源、执行评估和协调动作。</p>
+<h2>规避指令对账</h2>
+<p>指令发出先记为 <code>pending</code>；收到带协调编号（<code>coordination_ref</code>）的回执才置为 <code>confirmed</code>。重复回执只认一次，确认前可 <code>reissue_command</code>/<code>cancel_command</code>；观测修订改变风险等级会作废待确认指令并退回评估。</p>
+<pre>GET  /health
+GET  /api/state
+GET  /api/reconciliation
+GET  /api/items/{id}
 POST /api/items
 POST /api/items/{id}/sources
-POST /api/items/{id}/actions</pre></body></html>
+POST /api/items/{id}/actions
+       action=execute            {command_ref}                 发出指令（待确认）
+       action=reissue_command    {command_ref,expected_version}
+       action=cancel_command     {reason,expected_version}
+       action=report_revision    {observed_at,miss_distance_m,covariance_m,source,expected_version}
+POST /api/items/{id}/receipts    {command_ref,coordination_ref} 回执 confirmed/duplicate/late/unmatched</pre></body></html>
